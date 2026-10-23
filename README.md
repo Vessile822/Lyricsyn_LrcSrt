@@ -73,42 +73,71 @@
 在虛擬環境中執行：
 ```powershell
 # 標準強制對齊（自動檢測語言）
-python lyricsync.py "path/to/song.mp3"
+python src/lyricsync.py "songs/music.mp3"
 
 # 指定語言（如韓文 ko、日文 ja、中文 zh、英文 en）
-python lyricsync.py "path/to/song.mp3" --lang ko
+python src/lyricsync.py "songs/music.mp3" --lang ko
 
 # 批量對齊整個資料夾
-python lyricsync.py "D:/MyMusicFolder"
+python src/lyricsync.py "D:/MyMusicFolder"
 
 # SRT 直接轉 LRC
-python lyricsync.py "path/to/subtitle.srt"
+python src/lyricsync.py "path/to/subtitle.srt"
 ```
 
 ---
 
 ## 📂 專案結構 (Project Structure)
 
+專案嚴格遵循專業開源影音架構（參考 [852wa/JIZURA](https://github.com/852wa/JIZURA)），**第一層僅保留使用者操作入口與說明，底層程式碼與工具全數封裝分層**：
+
 ```text
-lyricsync/
-├── DROP_HERE.bat             # 核心入口：拖曳音訊/資料夾/SRT 立即執行
-├── INSTALL.bat               # 一鍵安裝批次檔
-├── install_uv.ps1            # uv 極速環境建置腳本
-├── launcher.py               # 穩定啟動器與日誌收集器
-├── lyricsync.py              # 核心主程式：人聲分離、標籤檢索、對齊與純聽寫
-├── mms_refine.py             # Meta MMS CTC 1130 發音微秒精煉演算法
-├── check_environment.py      # 硬體與 CUDA 運算能力驗證工具
-├── requirements.txt          # Python 套件清單
-├── songs/                    # 完成品與範例庫（音訊/TXT/SRT/LRC）
-│   ├── 아직 네 온기가 남아.lrc
-│   ├── 아직 네 온기가 남아.srt
-│   ├── 아직 네 온기가 남아.txt
-│   └── 每個停頓的理由.lrc
-├── 使用說明.html             # 圖文詳細使用手冊
-├── 先看這裡.txt              # 簡易文字快速指引
-├── README.md                 # 專案說明文件
-└── .gitignore                # Git 忽略設定（排除模型與大容量音訊）
+lyricsync/  (Repository Root)
+├── DROP_HERE.bat                  # [使用者入口] 拖曳歌曲/資料夾/SRT 立即執行
+├── INSTALL.bat                    # [使用者入口] 一鍵安裝環境 (呼叫 tools/install_uv.ps1)
+├── README.md                      # [專案說明] 核心文件與更新日誌
+├── LICENSE                        # [授權條款] MIT License
+├── .gitignore                     # [Git 規範] 排除虛擬環境、模型與大容量音訊
+│
+├── src/                           # [核心程式碼] 演算法與主程式模組
+│   ├── lyricsync.py               # 人聲抽離、標籤檢索、Whisper 對齊與純聽寫
+│   ├── mms_refine.py              # Meta MMS CTC 1130 發音微秒精煉
+│   └── launcher.py                # 跨環境啟動器與日誌收集器
+│
+├── tools/                         # [工具與安裝腳本]
+│   ├── install_uv.ps1             # uv 極速環境安裝腳本
+│   ├── install.ps1                # 原生 pip 安裝回退腳本
+│   ├── check_environment.py       # 硬體、CUDA 與 FFmpeg 診斷工具
+│   ├── python_probe.py            # Python 版本與環境探針
+│   ├── requirements.txt           # Python 核心相依套件清單
+│   └── runtime_config.json        # 執行期硬體快取配置檔
+│
+├── tests/                         # [自動化測試套件]
+│   └── test_embedded_lyrics.py    # 歌詞清洗、百分秒精度與標籤提取單元測試
+│
+├── docs/                          # [詳細說明文件]
+│   ├── 使用說明.html               # 圖文詳細使用手冊
+│   └── 先看這裡.txt                # 快速指引純文字手冊
+│
+└── songs/                         # [成果庫與範例]
+    ├── .gitkeep
+    ├── 아직 네 온기가 남아.lrc / .srt / .txt
+    └── 每個停頓的理由.lrc / .srt / .txt
 ```
+
+---
+
+## 📝 更新紀錄 (Changelog)
+
+### [v1.3.0] - 2026-10-23
+- **架構優化（第一層清爽分層封裝）**：
+  - 參考 [852wa/JIZURA](https://github.com/852wa/JIZURA) 現代化開源結構，第一層根目錄僅保留 `DROP_HERE.bat`、`INSTALL.bat`、`README.md`、`LICENSE`。
+  - 底層 Python 核心移至 `src/`；安裝腳本與診斷探針移至 `tools/`；測試套件移至 `tests/`；使用手冊移至 `docs/`。
+  - 同步重構批次檔與模組路徑，全流程無縫相容。
+- **精度與相容性強化**：
+  - `srt_to_lrc` 百分秒轉換改採純整數數學運算，徹底根除浮點數精度損失。
+  - 正則表達式精準化，確保帶括號歌詞不被誤判為結構標記。
+  - 新增 `ffmpeg -f ffmetadata -` 標籤提取回退機制。
 
 ---
 

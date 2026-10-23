@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import time
 import traceback
 import warnings
@@ -23,15 +24,26 @@ import soundfile as sf
 import torch
 from scipy.signal import resample_poly
 
+SRC_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SRC_DIR.parent
+SONGS_DIR = PROJECT_ROOT / "songs"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
-try:
-    _cfg = json.loads(
-        Path(__file__).with_name("runtime_config.json").read_text(encoding="utf-8")
-    )
-    if _cfg.get("device") == "cpu":
-        DEV = "cpu"
-except (OSError, ValueError):
-    pass
+for _cfg_path in (
+    PROJECT_ROOT / "tools" / "runtime_config.json",
+    SRC_DIR / "runtime_config.json",
+    PROJECT_ROOT / "runtime_config.json",
+):
+    if _cfg_path.exists():
+        try:
+            _cfg = json.loads(_cfg_path.read_text(encoding="utf-8"))
+            if _cfg.get("device") == "cpu":
+                DEV = "cpu"
+            break
+        except (OSError, ValueError):
+            pass
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False  # same input -> same SRT every run
 AUDIO_EXT = (".wav", ".mp3", ".flac", ".m4a", ".ogg")
@@ -636,7 +648,7 @@ def run(audio, lyr, outp, lang=None):
     print(f"  done {time.time() - t0:.0f}s -> {outp}")
 
     # 最後輸出完的歌曲與歌詞（.mp3, .txt, .srt, .lrc）存入 songs 資料夾
-    songs_dir = Path(__file__).resolve().parent / "songs"
+    songs_dir = SONGS_DIR
     songs_dir.mkdir(parents=True, exist_ok=True)
     files_to_sync = [audio, lyr, outp, lrc_path]
     if os.path.exists(chk):
@@ -730,7 +742,7 @@ def run_transcription(audio, outp, lang=None):
     print(f"  done {time.time() - t0:.0f}s -> {outp}", flush=True)
 
     # 4. 同步歸檔至 songs/ 目錄
-    songs_dir = Path(__file__).resolve().parent / "songs"
+    songs_dir = SONGS_DIR
     songs_dir.mkdir(parents=True, exist_ok=True)
     files_to_sync = [audio, txt_path, outp, lrc_path]
     for src_file in files_to_sync:
@@ -822,7 +834,7 @@ def main():
         lrc_path = os.path.splitext(srt_path)[0] + ".lrc"
         Path(lrc_path).write_text(lrc_text, encoding="utf-8")
         print(f"  [LRC 生成] 已產出 LRC: {os.path.basename(lrc_path)}", flush=True)
-        songs_dir = Path(__file__).resolve().parent / "songs"
+        songs_dir = SONGS_DIR
         songs_dir.mkdir(parents=True, exist_ok=True)
         for f in (srt_path, lrc_path):
             tgt = songs_dir / os.path.basename(f)

@@ -1,9 +1,12 @@
 import sys
 from pathlib import Path
 
-# Add lyricsync to path
-root = Path(__file__).resolve().parent
-sys.path.insert(0, str(root))
+# Add src to path
+tests_dir = Path(__file__).resolve().parent
+project_root = tests_dir.parent
+src_dir = project_root / "src"
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
 from lyricsync import clean_lyric_lines, extract_embedded_lyrics, srt_to_lrc
 
@@ -60,7 +63,7 @@ Like something small I couldn't let go
 
 
 def test_extract_from_songs():
-    songs_dir = root / "songs"
+    songs_dir = project_root / "songs"
     mp3s = list(songs_dir.glob("*.mp3"))
     if not mp3s:
         print("No sample mp3 found in songs/, skipping audio extraction test.")

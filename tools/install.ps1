@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
-Set-Location -LiteralPath $PSScriptRoot
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+Set-Location -LiteralPath $projectRoot
 $env:PYTHONIOENCODING = 'utf-8'
 $env:PYTHONUTF8 = '1'
 $env:PIP_DISABLE_PIP_VERSION_CHECK = '1'
@@ -26,7 +27,7 @@ function Test-Python {
 }
 
 try {
-    Start-Transcript -Path (Join-Path $PSScriptRoot 'install.log') -Force | Out-Null
+    Start-Transcript -Path (Join-Path $projectRoot 'install.log') -Force | Out-Null
     $script:transcribing = $true
     Write-Host 'LyricSync setup - keep this window open.' -ForegroundColor Cyan
     Write-Host 'Downloads may take 5-20 minutes. No PATH checkbox is needed.'
@@ -42,12 +43,16 @@ try {
         }
     }
 
-    foreach ($required in @('requirements.txt','python_probe.py','check_environment.py','lyricsync.py','mms_refine.py','launcher.py')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $required))) { throw 'Extract the entire ZIP first, then open INSTALL.bat in the extracted folder.' }
+    $srcDir = Join-Path $projectRoot 'src'
+    foreach ($required in @('requirements.txt','python_probe.py','check_environment.py')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $required))) { throw "Missing tool file: $required" }
+    }
+    foreach ($required in @('lyricsync.py','mms_refine.py','launcher.py')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $srcDir $required))) { throw "Missing source file in src: $required" }
     }
     Write-Host '[1/5] Finding Python 3.11+ (64-bit)...'
     $pythonExe = $null
-    $venvPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+    $venvPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
     if (Test-Path -LiteralPath $venvPython) {
         $pythonExe = Test-Python $venvPython
         if (-not $pythonExe) { throw 'The existing .venv is incompatible. Rename .venv to .venv_old and run INSTALL.bat again.' }
@@ -98,8 +103,8 @@ try {
     }
     Write-Host "Using: $pythonExe"
     Write-Host '[2/5] Preparing a separate environment...'
-    if (-not (Test-Path -LiteralPath $venvPython)) { Invoke-Checked $pythonExe @('-m','venv',(Join-Path $PSScriptRoot '.venv')) }
-    $env:PATH = (Join-Path $PSScriptRoot '.venv\Scripts') + ';' + $env:PATH
+    if (-not (Test-Path -LiteralPath $venvPython)) { Invoke-Checked $pythonExe @('-m','venv',(Join-Path $projectRoot '.venv')) }
+    $env:PATH = (Join-Path $projectRoot '.venv\Scripts') + ';' + $env:PATH
     Invoke-Checked $venvPython @('-m','ensurepip','--upgrade')
     Invoke-Checked $venvPython @('-m','pip','install','--upgrade','pip','setuptools','wheel')
     Write-Host '[3/5] Installing matching PyTorch packages...'

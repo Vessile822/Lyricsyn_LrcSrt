@@ -8,14 +8,15 @@ from pathlib import Path
 
 
 def main():
-    root = Path(__file__).resolve().parent
+    src_dir = Path(__file__).resolve().parent
+    project_root = src_dir.parent
     os.environ["PATH"] = (
         str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")
     )
     os.environ["PYTHONIOENCODING"] = "utf-8"
     os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
-    args = sys.argv[1:] or [str(root / "songs")]
-    log = root / "last_run.log"
+    args = sys.argv[1:] or [str(project_root / "songs")]
+    log = project_root / "last_run.log"
     print(
         "LyricSync: processing. The first run downloads AI models; please keep this window open.",
         flush=True,
@@ -25,7 +26,7 @@ def main():
         out.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
         out.flush()
         proc = subprocess.Popen(
-            [sys.executable, "-u", str(root / "lyricsync.py"), *args],
+            [sys.executable, "-u", str(src_dir / "lyricsync.py"), *args],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

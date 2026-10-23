@@ -1,6 +1,7 @@
 # LyricSync Windows 現代化極速安裝腳本 (整合 RTX 5060 Ti + uv + Python 3.14)
 $ErrorActionPreference = 'Stop'
-Set-Location -LiteralPath $PSScriptRoot
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+Set-Location -LiteralPath $projectRoot
 $env:PYTHONIOENCODING = 'utf-8'
 $env:PYTHONUTF8 = '1'
 
@@ -14,9 +15,9 @@ if (-not (Get-Command uv.exe -ErrorAction SilentlyContinue)) {
     exit 1
 }
 Write-Host "[1/4] 檢查 Python 與建立虛擬環境..." -ForegroundColor Green
-& uv.exe venv --python "3.14" .venv --allow-existing
+& uv.exe venv --python "3.14" (Join-Path $projectRoot '.venv') --allow-existing
 
-$venvPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+$venvPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $venvPython)) {
     throw "虛擬環境 Python 建立失敗: $venvPython"
 }

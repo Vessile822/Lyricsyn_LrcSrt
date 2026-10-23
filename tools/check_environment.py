@@ -9,7 +9,12 @@ from pathlib import Path
 
 
 def main():
-    root = Path(__file__).resolve().parent
+    tools_dir = Path(__file__).resolve().parent
+    project_root = tools_dir.parent
+    src_dir = project_root / "src"
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
+
     for name in (
         "numpy",
         "soundfile",
@@ -86,7 +91,7 @@ def main():
         "torchaudio": torchaudio.__version__,
         "gpu_note": reason,
     }
-    (root / "runtime_config.json").write_text(
+    (tools_dir / "runtime_config.json").write_text(
         json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print("FFmpeg: OK")

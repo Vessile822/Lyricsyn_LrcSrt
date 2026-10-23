@@ -25,7 +25,7 @@ def _load(dev):
 
         _m["tok"] = AutoTokenizer.from_pretrained(MMS).get_vocab()
         _m["model"] = (
-            AutoModelForCTC.from_pretrained(MMS, torch_dtype=torch.float32)
+            AutoModelForCTC.from_pretrained(MMS, dtype=torch.float32)
             .to(dev)
             .eval()
         )  # fp16 -> NaN on GTX16
