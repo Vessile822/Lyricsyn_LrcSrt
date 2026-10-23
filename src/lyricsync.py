@@ -138,8 +138,8 @@ def clean_lyric_lines(raw_text: str) -> list:
     lines = []
     for line in raw_text.splitlines():
         line = line.strip()
-        # Handle potential LRC timestamps
-        line = re.sub(r"^\[\d+:\d+(?:\.\d+)?\]\s*", "", line).strip()
+        # Handle potential LRC timestamps (including multiple consecutive timestamps like [01:20.00][02:40.00])
+        line = re.sub(r"^(?:\[\d+:\d+(?:\.\d+)?\]\s*)+", "", line).strip()
         if not line:
             continue
         # Skip pure section markers: [Chorus], [Verse 1], *guitar solo*, 【副歌】
@@ -173,6 +173,7 @@ def extract_embedded_lyrics(audio_path: str):
                 audio_path,
             ],
             capture_output=True,
+            check=False,
             text=True,
             timeout=10,
             encoding="utf-8",
@@ -196,6 +197,7 @@ def extract_embedded_lyrics(audio_path: str):
         proc = subprocess.run(
             ["ffmpeg", "-v", "quiet", "-i", audio_path, "-f", "ffmetadata", "-"],
             capture_output=True,
+            check=False,
             text=True,
             timeout=10,
             encoding="utf-8",

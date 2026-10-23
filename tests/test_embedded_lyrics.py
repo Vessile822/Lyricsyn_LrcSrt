@@ -19,6 +19,7 @@ def test_clean_lyric_lines():
     [Verse 1]
     像那年你 靠近的距離（合唱）
     [01:23.45]Take me back, take me back
+    [01:50.00][02:40.00] Repeated chorus line
     【副歌】
     回到那個年代 你牽著我的手
     (那些年我們說過的話)
@@ -32,6 +33,7 @@ def test_clean_lyric_lines():
     assert "窗上的雨 一滴一滴" in lines
     assert "像那年你 靠近的距離" in lines
     assert "Take me back, take me back" in lines
+    assert "Repeated chorus line" in lines
     assert "回到那個年代 你牽著我的手" in lines
     assert "(那些年我們說過的話)" in lines, (
         "Normal parenthetical lyrics should NOT be stripped"

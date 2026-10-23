@@ -25,9 +25,7 @@ def _load(dev):
 
         _m["tok"] = AutoTokenizer.from_pretrained(MMS).get_vocab()
         _m["model"] = (
-            AutoModelForCTC.from_pretrained(MMS, dtype=torch.float32)
-            .to(dev)
-            .eval()
+            AutoModelForCTC.from_pretrained(MMS, dtype=torch.float32).to(dev).eval()
         )  # fp16 -> NaN on GTX16
         _m["ur"] = ur.Uroman()
     return _m["model"], _m["tok"], _m["ur"]
