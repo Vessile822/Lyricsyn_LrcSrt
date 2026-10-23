@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lyricsync 使用說明</title>
+<style>
+:root{
+  --bg:#f7f5f0; --card:#ffffff; --ink:#1f1d1a; --muted:#6b665d; --line:#e2ddd2;
+  --accent:#b4532a; --accent-soft:#f6e6dc; --ok:#2f7d4f; --ok-soft:#e1f1e7; --warn:#9a6a00; --warn-soft:#fbf0d3;
+  --code:#2b2925; --code-ink:#f3efe6;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#161513; --card:#1f1d1a; --ink:#ece8df; --muted:#a39d91; --line:#34312c;
+    --accent:#e08a5e; --accent-soft:#3a271d; --ok:#6cc58f; --ok-soft:#1d3226; --warn:#e3b54a; --warn-soft:#3a2f14;
+    --code:#0f0e0d; --code-ink:#ece8df;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 "Noto Sans TC","Microsoft JhengHei","PingFang TC",system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:40px 16px 80px}
+h1{font-size:2rem;margin:0 0 4px;letter-spacing:.02em}
+h2{font-size:1.35rem;margin:48px 0 12px;padding-top:8px;border-top:1px solid var(--line)}
+h3{font-size:1.05rem;margin:24px 0 6px}
+p{margin:8px 0}
+.lead{color:var(--muted);margin-bottom:24px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:16px 0}
+.step{display:grid;grid-template-columns:44px 1fr;gap:14px;align-items:start}
+.num{width:44px;height:44px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700;font-size:1.1rem}
+figure{margin:14px 0;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+figure svg{width:100%;height:auto;display:block}
+figcaption{color:var(--muted);font-size:.9rem;margin-top:8px;text-align:center}
+code,kbd{font-family:Consolas,"Cascadia Mono",monospace;font-size:.92em;background:var(--accent-soft);padding:1px 6px;border-radius:5px}
+pre{background:var(--code);color:var(--code-ink);padding:14px 16px;border-radius:10px;overflow-x:auto;font:14px/1.6 Consolas,"Cascadia Mono",monospace}
+.note{border-left:4px solid var(--warn);background:var(--warn-soft);padding:10px 14px;border-radius:8px;margin:14px 0}
+.good{border-left:4px solid var(--ok);background:var(--ok-soft);padding:10px 14px;border-radius:8px;margin:14px 0}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:.95rem}
+th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.toc{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 0}
+.toc a{color:var(--accent);text-decoration:none;border:1px solid var(--line);background:var(--card);padding:4px 12px;border-radius:999px;font-size:.92rem}
+/* svg theming */
+.s-bg{fill:var(--card)} .s-panel{fill:var(--bg);stroke:var(--line)} .s-ink{fill:var(--ink)} .s-muted{fill:var(--muted)}
+.s-accent{fill:var(--accent)} .s-accent-soft{fill:var(--accent-soft)} .s-stroke{stroke:var(--ink);fill:none}
+.s-ok{fill:var(--ok)} .s-arrow{stroke:var(--accent);fill:none;stroke-width:3;stroke-linecap:round}
+.s-code{fill:var(--code)} .s-code-ink{fill:var(--code-ink)}
+text{font-family:"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif}
+.mono{font-family:Consolas,"Cascadia Mono",monospace}
+</style>
+</head>
+<body>
+<main>
+
+<h1>lyricsync 歌詞自動對齊</h1>
+<p class="lead">丟一首歌和它的歌詞，自動產生 SRT 字幕，每一句的出現、消失時間對準人聲。全程在自己電腦上跑，不用帳號、不用上傳。</p>
+
+<figure>
+<svg viewBox="0 0 820 200" role="img" aria-label="流程：歌曲與歌詞，經過分離人聲、聽寫定位、逐字精修，產生 SRT">
+  <rect x="0" y="0" width="820" height="200" rx="12" class="s-bg"/>
+  <!-- inputs -->
+  <rect x="20" y="40" width="130" height="50" rx="10" class="s-accent-soft"/>
+  <text x="85" y="71" text-anchor="middle" class="s-ink" font-size="16">🎵 歌.wav</text>
+  <rect x="20" y="110" width="130" height="50" rx="10" class="s-accent-soft"/>
+  <text x="85" y="141" text-anchor="middle" class="s-ink" font-size="16">📝 歌.txt</text>
+  <path d="M155 65 L195 95 M155 135 L195 105" class="s-arrow"/>
+  <!-- steps -->
+  <rect x="200" y="70" width="150" height="60" rx="10" class="s-panel"/>
+  <text x="275" y="96" text-anchor="middle" class="s-ink" font-size="15" font-weight="700">① 分離人聲</text>
+  <text x="275" y="117" text-anchor="middle" class="s-muted" font-size="12">拿掉伴奏</text>
+  <path d="M352 100 L382 100" class="s-arrow"/>
+  <rect x="385" y="70" width="150" height="60" rx="10" class="s-panel"/>
+  <text x="460" y="96" text-anchor="middle" class="s-ink" font-size="15" font-weight="700">② 聽寫定位</text>
+  <text x="460" y="117" text-anchor="middle" class="s-muted" font-size="12">找出每句在哪</text>
+  <path d="M537 100 L567 100" class="s-arrow"/>
+  <rect x="570" y="70" width="110" height="60" rx="10" class="s-panel"/>
+  <text x="625" y="96" text-anchor="middle" class="s-ink" font-size="15" font-weight="700">③ 逐字精修</text>
+  <text x="625" y="117" text-anchor="middle" class="s-muted" font-size="12">抓準起唱點</text>
+  <path d="M682 100 L712 100" class="s-arrow"/>
+  <rect x="715" y="70" width="90" height="60" rx="10" class="s-accent"/>
+  <text x="760" y="106" text-anchor="middle" fill="#fff" font-size="17" font-weight="700">歌.srt</text>
+  <text x="410" y="185" text-anchor="middle" class="s-muted" font-size="13">全部自動，你只要拖一次檔案</text>
+</svg>
+<figcaption>它怎麼運作</figcaption>
+</figure>
+
+<div class="toc">
+  <a href="#install">一、安裝（第一次）</a>
+  <a href="#use">二、使用</a>
+  <a href="#check">三、看結果</a>
+  <a href="#tips">四、準度與小技巧</a>
+  <a href="#faq">五、常見問題</a>
+</div>
+
+<h2 id="install">一、安裝（只要做一次）</h2>
+
+<div class="card"><h3>解壓縮後，雙擊 INSTALL.bat</h3><p>請先將整個 ZIP 全部解壓縮到固定資料夾，再執行 INSTALL.bat。不需要尋找 Python 的 PATH 勾選框。</p><p>安裝程式會偵測 64 位元 Python 3.11／3.12；沒有時會嘗試 Python Install Manager 或下載 python.org 官方安裝程式。套件安裝到本資料夾的 .venv，並準備 FFmpeg。</p><p>出現 <code>INSTALLATION SUCCESSFUL</code> 才算完成。首次會下載數 GB，請保持視窗開著。套件檢查完成不代表 AI 模型已下載；模型會在第一次處理歌曲時下載。</p><p>失敗時請提供 <code>install.log</code>；歌曲處理失敗時提供 <code>last_run.log</code>。詳細步驟見「先看這裡.txt」。</p></div>
+<h2 id="use">二、使用</h2>
+
+<div class="card step">
+  <div class="num">1</div>
+  <div>
+    <h3 style="margin-top:0">準備兩個檔案，<b>檔名要一模一樣</b></h3>
+    <p>歌曲檔，加上同名的歌詞 <code>.txt</code>。歌詞<b>一行就是字幕的一句</b>，你想怎麼分句就怎麼斷行。</p>
+  </div>
+</div>
+
+<figure>
+<svg viewBox="0 0 820 250" role="img" aria-label="資料夾內有 失衡感.wav 與 失衡感.txt，txt 內容一行一句">
+  <rect width="820" height="250" rx="12" class="s-bg"/>
+  <!-- folder window -->
+  <rect x="20" y="20" width="360" height="210" rx="8" class="s-panel"/>
+  <text x="36" y="46" class="s-muted" font-size="13">📁 我的歌</text>
+  <line x1="20" y1="58" x2="380" y2="58" stroke="var(--line)"/>
+  <text x="40" y="92" class="s-ink" font-size="16">🎵 失衡感.wav</text>
+  <text x="40" y="128" class="s-ink" font-size="16">📝 失衡感.txt</text>
+  <rect x="34" y="72" width="330" height="70" rx="6" fill="none" stroke="var(--ok)" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="200" y="175" text-anchor="middle" class="s-ok" font-size="14" font-weight="700">✔ 檔名相同（只有副檔名不同）</text>
+  <text x="200" y="205" text-anchor="middle" class="s-muted" font-size="13">✘ 失衡感.wav + 失衡感歌詞.txt → 對不起來</text>
+  <!-- txt preview -->
+  <rect x="420" y="20" width="380" height="210" rx="8" class="s-panel"/>
+  <text x="436" y="46" class="s-muted" font-size="13">失衡感.txt</text>
+  <line x1="420" y1="58" x2="800" y2="58" stroke="var(--line)"/>
+  <text x="440" y="88" class="s-ink" font-size="15">你像風 撥亂我世界的鐘</text>
+  <text x="440" y="116" class="s-ink" font-size="15">我像夢 懸停在你慢一拍的空</text>
+  <text x="440" y="144" class="s-ink" font-size="15">追不上的星辰 模糊了你的影蹤</text>
+  <text x="440" y="172" class="s-muted" font-size="15">[Chorus]   ← 這種標籤會自動略過</text>
+  <text x="440" y="200" class="s-ink" font-size="15">是你給我 失衡感</text>
+</svg>
+<figcaption>一行 = 字幕的一句；[Verse]、[Chorus] 這類標籤和空行都會自動略過</figcaption>
+</figure>
+
+<div class="card step">
+  <div class="num">2</div>
+  <div>
+    <h3 style="margin-top:0">拖到 <code>DROP_HERE.bat</code> 的<b>圖示上</b>放開</h3>
+    <p>拖什麼都可以：歌曲檔、歌詞 txt、兩個一起、整個資料夾，或一次拖好幾首。</p>
+    <div class="note">是拖到 <b>DROP_HERE.bat 的圖示上</b>，不是拖進打開後的黑色視窗。</div>
+  </div>
+</div>
+
+<figure>
+<svg viewBox="0 0 820 200" role="img" aria-label="把檔案拖到 DROP_HERE.bat 圖示上">
+  <rect width="820" height="200" rx="12" class="s-bg"/>
+  <rect x="60" y="55" width="200" height="90" rx="10" class="s-accent-soft"/>
+  <text x="160" y="95" text-anchor="middle" class="s-ink" font-size="16">🎵 失衡感.wav</text>
+  <text x="160" y="122" text-anchor="middle" class="s-muted" font-size="13">（或 txt／整個資料夾）</text>
+  <path d="M270 100 C 380 40, 470 40, 560 92" class="s-arrow" stroke-dasharray="8 6"/>
+  <path d="M548 80 L562 94 L544 100" class="s-arrow"/>
+  <rect x="580" y="45" width="150" height="110" rx="12" class="s-panel"/>
+  <rect x="625" y="62" width="60" height="50" rx="6" class="s-code"/>
+  <text x="655" y="94" text-anchor="middle" class="s-code-ink mono" font-size="14">C:\&gt;</text>
+  <text x="655" y="138" text-anchor="middle" class="s-ink mono" font-size="14">DROP_HERE.bat</text>
+  <text x="410" y="185" text-anchor="middle" class="s-muted" font-size="13">放開滑鼠，就會跳出黑色視窗開始跑</text>
+</svg>
+<figcaption>拖曳到圖示上</figcaption>
+</figure>
+
+<div class="card step">
+  <div class="num">3</div>
+  <div>
+    <h3 style="margin-top:0">等它跑完</h3>
+    <p>黑色視窗會顯示進度，看到 <code>done</code> 就完成了，按任意鍵關掉。</p>
+  </div>
+</div>
+
+<figure>
+<svg viewBox="0 0 820 210" role="img" aria-label="執行中的命令視窗輸出">
+  <rect width="820" height="210" rx="12" class="s-code"/>
+  <circle cx="24" cy="20" r="5" fill="#e06c5a"/><circle cx="42" cy="20" r="5" fill="#e3b54a"/><circle cx="60" cy="20" r="5" fill="#6cc58f"/>
+  <text x="24" y="56" class="s-code-ink mono" font-size="15">失衡感.wav  (44 lines, lang=zh, cuda)</text>
+  <text x="24" y="84" class="s-code-ink mono" font-size="15">  vocals separated  14s</text>
+  <text x="24" y="112" class="s-code-ink mono" font-size="15">  aligned           58s</text>
+  <text x="24" y="140" fill="#6cc58f" class="mono" font-size="15">  done 95s -&gt; 失衡感.srt</text>
+  <text x="24" y="182" fill="#a39d91" class="mono" font-size="15">Press any key to continue . . .</text>
+</svg>
+<figcaption>第一次跑會先下載模型（約 2～3 GB），會比較久；之後就快了</figcaption>
+</figure>
+
+<h2 id="check">三、看結果</h2>
+<p>歌曲旁邊會多出：</p>
+<table>
+  <tr><th>檔案</th><th>是什麼</th></tr>
+  <tr><td><code>歌.srt</code></td><td>字幕檔，可以直接匯入剪映、Premiere、DaVinci、YouTube 等。</td></tr>
+  <tr><td><code>歌_請檢查.txt</code></td><td>只有發現可疑的句子才會出現，列出建議你看一眼的句子和原因（太短、太長、對不上）。</td></tr>
+</table>
+<div class="good">不用整首重看。打開 SRT 掃一下，再看「請檢查」列出的句子就好。</div>
+
+<h2 id="tips">四、準度與小技巧</h2>
+<table>
+  <tr><th>情況</th><th>表現</th></tr>
+  <tr><td>中文歌</td><td>最穩。實測 8 首，起唱點中位誤差約 0.02～0.08 秒，每首大約 1～3 句需要微調。</td></tr>
+  <tr><td>英文歌</td><td>堪用。每首通常有幾句差 0.3～0.5 秒。</td></tr>
+  <tr><td>日文歌</td><td>測試過一首，聽起來蠻準。韓文和其他語言程式能跑，但還沒驗證。</td></tr>
+  <tr><td>開頭有哼唱</td><td>會自動判斷，大多能抓到真正的第一個字。</td></tr>
+  <tr><td>很長的拖音</td><td>句尾可能比聲音早收一點，可自行拉長。</td></tr>
+</table>
+<h3>讓它更準的方法</h3>
+<ul>
+  <li><b>歌詞要跟實際唱的一樣。</b>AI 歌常會偷改字、重複段落、多唱一句。txt 跟實際演唱差越多，越容易歪。</li>
+  <li><b>重複的段落也要寫出來。</b>副歌唱三次，txt 就寫三次。</li>
+  <li><b>不確定語言時</b>，可以在命令列加 <code>--lang ja</code>（日文）、<code>--lang ko</code>（韓文）、<code>--lang en</code>（英文）。平常會自動判斷。</li>
+</ul>
+
+<h2 id="faq">五、常見問題</h2>
+<h3>跑起來說「找不到 Python」</h3>
+<p>請確認使用修正版，完整解壓縮後重新執行 INSTALL.bat；它會自動偵測或安裝適用的 Python。失敗時提供 install.log。</p>
+<h3>說「缺歌詞 .txt」或「缺同名的音檔」</h3>
+<p>兩個檔名沒有完全一樣，連空格、全形半形都要相同。</p>
+<h3>沒有顯卡可以用嗎？</h3>
+<p>可以，只是慢很多：一首歌可能要 5～10 分鐘，有相容 NVIDIA 顯卡通常較快，依硬體與歌曲長度而異。</p>
+<h3>丟 mp3 / mp4 出現錯誤</h3>
+<p>修正版已準備 FFmpeg。請重新執行 INSTALL.bat，若仍失敗，提供 last_run.log。</p>
+<h3>同一首跑兩次結果一樣嗎？</h3>
+<p>一樣。同樣的歌和歌詞，每次產生的 SRT 都相同。</p>
+<h3>會上傳我的歌嗎？</h3>
+<p>不會。只有第一次會從網路下載公開的 AI 模型，之後歌曲和歌詞都只在你自己的電腦上處理。</p>
+
+<p class="lead" style="margin-top:48px">使用的開源模型：Demucs（Meta，人聲分離）、Whisper（OpenAI，聽寫定位）、MMS（Meta，多語言逐字對齊），透過 stable-ts 與 transformers 執行。</p>
+</main>
+</body>
+</html>

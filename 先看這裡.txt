@@ -1,0 +1,24 @@
+﻿LyricSync Windows 安裝修正版
+
+1. 對 ZIP 按右鍵 → 全部解壓縮，放在新的資料夾。
+2. 打開解壓縮後的 lyricsync，雙擊 INSTALL.bat。
+3. 保持視窗開著，等到出現 INSTALLATION SUCCESSFUL 才算安裝成功。
+   首次需下載數 GB，時間取決於網速；中途失敗可以再執行同一個 INSTALL.bat。
+4. 準備同一資料夾裡的「歌名.wav」及「歌名.txt」，歌詞一行一句。
+   將歌曲拖到 DROP_HERE.bat 的圖示上。也支援 mp3、m4a、mp4。
+5. 第一次處理歌曲還需下載 AI 模型，可能等較久；字幕完成後會存到歌曲旁邊。
+
+不需要找 Add python.exe to PATH，也不需要先解除安裝你原本的 Python。
+安裝程式優先使用已存在的 64 位元 Python 3.11 / 3.12。
+若有 Python Install Manager，會嘗試透過它安裝 3.12。
+若仍找不到，會從 python.org 下載並檢查官方簽章，為目前使用者安裝 Python 3.12.10。
+套件放在本資料夾的 .venv；FFmpeg 會一併準備。
+有 NVIDIA 顯卡會嘗試 GPU 版；實際 GPU 計算檢查未通過時，使用 CPU 模式。
+
+如果出錯：
+安裝失敗 → 把同一資料夾的 install.log 上傳給我。
+歌曲處理失敗 → 把 last_run.log 上傳給我。
+請保留整個資料夾，別只移動兩個 BAT。
+移動資料夾可能使 .venv 失效，請盡量從一開始就放在固定位置。
+
+驗證範圍：已檢查程式語法、套件需求及啟動流程；尚未在你的 Windows 電腦實際安裝或測試完整歌曲。

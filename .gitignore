@@ -1,0 +1,47 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Caches
+.cache/
+.pytest_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Logs & Runtime Artefacts
+*.log
+install.log
+last_run.log
+*_請檢查.txt
+
+# Media & Audio files (prevent large binary blobs in Git)
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.aac
+*.ogg
+
+# OS specific files
+Thumbs.db
+[Dd]esktop.ini
+.DS_Store
+
+# Editor & IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
