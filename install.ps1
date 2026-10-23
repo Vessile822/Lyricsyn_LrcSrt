@@ -6,11 +6,13 @@ $env:PIP_DISABLE_PIP_VERSION_CHECK = '1'
 $env:PIP_DEFAULT_TIMEOUT = '120'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $script:transcribing = $false
+
 function Invoke-Checked {
     param([string]$Exe, [string[]]$Arguments)
     & $Exe @Arguments
     if ($LASTEXITCODE -ne 0) { throw "Command failed (exit $LASTEXITCODE): $Exe $($Arguments -join ' ')" }
 }
+
 function Test-Python {
     param([string]$Exe, [string[]]$Prefix = @())
     try {
@@ -22,16 +24,28 @@ function Test-Python {
     } catch { }
     return $null
 }
+
 try {
     Start-Transcript -Path (Join-Path $PSScriptRoot 'install.log') -Force | Out-Null
     $script:transcribing = $true
     Write-Host 'LyricSync setup - keep this window open.' -ForegroundColor Cyan
-    Write-Host 'Downloads may take 10-30 minutes. No PATH checkbox is needed.'
+    Write-Host 'Downloads may take 5-20 minutes. No PATH checkbox is needed.'
     if (-not [Environment]::Is64BitOperatingSystem) { throw '64-bit Windows is required.' }
+
+    # 若系統具備 uv，自動優先使用極速 uv 現代化安裝管線
+    if (Get-Command uv.exe -ErrorAction SilentlyContinue) {
+        Write-Host 'Detected uv package manager. Switching to high-speed install_uv.ps1...' -ForegroundColor Green
+        & (Join-Path $PSScriptRoot 'install_uv.ps1')
+        if ($LASTEXITCODE -eq 0) {
+            if ($script:transcribing) { Stop-Transcript | Out-Null }
+            exit 0
+        }
+    }
+
     foreach ($required in @('requirements.txt','python_probe.py','check_environment.py','lyricsync.py','mms_refine.py','launcher.py')) {
         if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $required))) { throw 'Extract the entire ZIP first, then open INSTALL.bat in the extracted folder.' }
     }
-    Write-Host '[1/5] Finding Python 3.11 / 3.12 (64-bit)...'
+    Write-Host '[1/5] Finding Python 3.11+ (64-bit)...'
     $pythonExe = $null
     $venvPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
     if (Test-Path -LiteralPath $venvPython) {
@@ -39,13 +53,15 @@ try {
         if (-not $pythonExe) { throw 'The existing .venv is incompatible. Rename .venv to .venv_old and run INSTALL.bat again.' }
     }
     if (-not $pythonExe -and (Get-Command py.exe -ErrorAction SilentlyContinue)) {
-        foreach ($version in @('-3.12','-3.11')) {
+        foreach ($version in @('-3.14','-3.13','-3.12','-3.11')) {
             $pythonExe = Test-Python 'py.exe' @($version)
             if ($pythonExe) { break }
         }
     }
     if (-not $pythonExe) {
         foreach ($candidate in @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python314\python.exe'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\python.exe'),
             (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'),
             (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python311\python.exe'),
             (Join-Path $env:LOCALAPPDATA 'LyricSyncRuntime\Python312\python.exe')
@@ -93,14 +109,14 @@ try {
         $gpu = ($LASTEXITCODE -eq 0)
     }
     if ($gpu) {
-        Write-Host 'NVIDIA detected. Trying CUDA 12.6 build...'
-        & $venvPython -m pip install 'torch==2.6.0' 'torchaudio==2.6.0' --index-url https://download.pytorch.org/whl/cu126
+        Write-Host 'NVIDIA detected. Trying CUDA build...'
+        & $venvPython -m pip install 'torch>=2.11.0' 'torchaudio>=2.11.0' --index-url https://download.pytorch.org/whl/cu126
         if ($LASTEXITCODE -ne 0) {
             Write-Host 'GPU package installation failed; retrying with CPU build.' -ForegroundColor Yellow
-            Invoke-Checked $venvPython @('-m','pip','install','--force-reinstall','torch==2.6.0','torchaudio==2.6.0','--index-url','https://download.pytorch.org/whl/cpu')
+            Invoke-Checked $venvPython @('-m','pip','install','--force-reinstall','torch>=2.11.0','torchaudio>=2.11.0','--index-url','https://download.pytorch.org/whl/cpu')
         }
     } else {
-        Invoke-Checked $venvPython @('-m','pip','install','torch==2.6.0','torchaudio==2.6.0','--index-url','https://download.pytorch.org/whl/cpu')
+        Invoke-Checked $venvPython @('-m','pip','install','torch>=2.11.0','torchaudio>=2.11.0','--index-url','https://download.pytorch.org/whl/cpu')
     }
     Write-Host '[4/5] Installing LyricSync dependencies and FFmpeg...'
     Invoke-Checked $venvPython @('-m','pip','install','-r',(Join-Path $PSScriptRoot 'requirements.txt'))
@@ -109,8 +125,8 @@ try {
     Invoke-Checked $venvPython @((Join-Path $PSScriptRoot 'check_environment.py'))
     Write-Host ''
     Write-Host 'INSTALLATION SUCCESSFUL' -ForegroundColor Green
-    Write-Host 'Drag a song and its same-name lyrics TXT onto DROP_HERE.bat.'
-    Write-Host 'The first song will download AI models. It can take much longer.'
+    Write-Host 'Drag a song onto DROP_HERE.bat to begin.'
+    Write-Host 'The first song will download AI models. It can take a bit longer.'
 } catch {
     Write-Host ''
     Write-Host ('INSTALLATION FAILED: ' + $_.Exception.Message) -ForegroundColor Red

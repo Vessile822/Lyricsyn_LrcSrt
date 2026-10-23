@@ -3,22 +3,37 @@ pipeline: demucs vocal separation -> Whisper (turbo) forced alignment of the giv
           -> extend line ends through the sung tail -> flag suspicious lines.
 usage: python lyricsync.py <song | lyrics.txt | folder> [...] [--lang ja]
 """
-import os, re, time, argparse, warnings, difflib, json, traceback, shutil
+
+import argparse
+import difflib
+import json
+import os
+import re
+import shutil
+import time
+import traceback
+import warnings
 from pathlib import Path
+
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
 warnings.filterwarnings("ignore")
-import numpy as np, soundfile as sf, torch
+import numpy as np
+import soundfile as sf
+import torch
 from scipy.signal import resample_poly
 
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
 try:
-    _cfg = json.loads(Path(__file__).with_name("runtime_config.json").read_text(encoding="utf-8"))
+    _cfg = json.loads(
+        Path(__file__).with_name("runtime_config.json").read_text(encoding="utf-8")
+    )
     if _cfg.get("device") == "cpu":
         DEV = "cpu"
 except (OSError, ValueError):
     pass
-torch.backends.cudnn.deterministic = True; torch.backends.cudnn.benchmark = False  # same input -> same SRT every run
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False  # same input -> same SRT every run
 AUDIO_EXT = (".wav", ".mp3", ".flac", ".m4a", ".ogg")
 WHISPER = "turbo"
 _models = {}
@@ -29,8 +44,25 @@ def load_audio(path):
         x, sr = sf.read(path, always_2d=True, dtype="float32")
     except Exception:  # mp3/m4a etc via ffmpeg
         import subprocess
-        raw = subprocess.run(["ffmpeg", "-v", "quiet", "-i", path, "-f", "f32le", "-ac", "2", "-ar", "44100", "-"],
-                             capture_output=True, check=True).stdout
+
+        raw = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "quiet",
+                "-i",
+                path,
+                "-f",
+                "f32le",
+                "-ac",
+                "2",
+                "-ar",
+                "44100",
+                "-",
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout
         x, sr = np.frombuffer(raw, np.float32).reshape(-1, 2), 44100
     return x, sr
 
@@ -38,8 +70,10 @@ def load_audio(path):
 def separate_vocals(x, sr):
     """-> mono vocals at 16 kHz"""
     import gc
-    from demucs.pretrained import get_model
+
     from demucs.apply import apply_model
+    from demucs.pretrained import get_model
+
     m = get_model("htdemucs").to(DEV).eval()
     if sr != m.samplerate:
         x = resample_poly(x, m.samplerate, sr, axis=0).astype(np.float32)
@@ -49,9 +83,14 @@ def separate_vocals(x, sr):
     ref = wav.mean(0)
     wav = (wav - ref.mean()) / (ref.std() + 1e-8)
     import random
-    random.seed(0)  # demucs picks a random time shift -> fix it so the same song always gives the same SRT
+
+    random.seed(
+        0
+    )  # demucs picks a random time shift -> fix it so the same song always gives the same SRT
     with torch.no_grad():
-        out = apply_model(m, wav[None], device=DEV, split=True, overlap=0.25, progress=False)[0]  # shifts=2 tested 2026-10-15: worse
+        out = apply_model(
+            m, wav[None], device=DEV, split=True, overlap=0.25, progress=False
+        )[0]  # shifts=2 tested 2026-10-15: worse
     voc = out[m.sources.index("vocals")] * (ref.std() + 1e-8) + ref.mean()
     voc_np = voc.mean(0).cpu().numpy()
     # 立即銷毀 Demucs 模型與張量，釋放 1.5GB+ VRAM 與 RAM
@@ -66,11 +105,20 @@ def fix_mojibake(text: str) -> str:
     """Recover UTF-8 text misread as Latin-1 by ffprobe (common with Korean/Japanese/Chinese tags)."""
     try:
         fixed = text.encode("latin-1").decode("utf-8")
-        if fixed != text and re.search(r"[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]", fixed):
+        if fixed != text and re.search(
+            r"[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]", fixed
+        ):
             return fixed
     except (UnicodeDecodeError, UnicodeEncodeError):
         pass
     return text
+
+
+SECTION_TAG_PATTERN = re.compile(
+    r"^[\[\(（【\*]\s*(?:verse|chorus|intro|outro|bridge|pre-chorus|hook|solo|interlude|instrumental|副歌|主歌|間奏|前奏|尾奏|合唱|伴唱|結尾)[^\]\)）】\*]*[\]\)）】\*]$",
+    re.IGNORECASE,
+)
+BRACKET_TAG_PATTERN = re.compile(r"^[\[【\*][^\]】\*]+[\]】\*]$")
 
 
 def clean_lyric_lines(raw_text: str) -> list:
@@ -80,55 +128,107 @@ def clean_lyric_lines(raw_text: str) -> list:
         line = line.strip()
         # Handle potential LRC timestamps
         line = re.sub(r"^\[\d+:\d+(?:\.\d+)?\]\s*", "", line).strip()
-        # Skip pure section markers: [Chorus], [Verse 1], *guitar solo*, 【副歌】
-        if not line or re.fullmatch(r"[\[\(（【\*].*[\]\)）】\*]", line):
+        if not line:
             continue
-        # Clean parenthetical annotations like （合唱）
-        line = re.sub(r"[（\(][^）\)]*[）\)]", "", line).strip()
+        # Skip pure section markers: [Chorus], [Verse 1], *guitar solo*, 【副歌】
+        if SECTION_TAG_PATTERN.match(line) or BRACKET_TAG_PATTERN.match(line):
+            continue
+        # Clean inline parenthetical annotations like （合唱）
+        line = re.sub(
+            r"[（\(][^）\)]*(?:合唱|伴唱|二重唱|朗誦|口白|獨白)[^）\)]*[）\)]", "", line
+        ).strip()
         if line:
             lines.append(line)
     return lines
 
 
 def extract_embedded_lyrics(audio_path: str):
-    """Extract lyrics from audio metadata tags (Suno AI, Udio, ID3, etc.)."""
+    """Extract lyrics from audio metadata tags (Suno AI, Udio, ID3, etc.).
+    Supports ffprobe JSON output, with automatic fallback to ffmpeg ffmetadata."""
     import subprocess
+
+    # Method 1: ffprobe JSON
     try:
         proc = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_entries", "format_tags", "-of", "json", audio_path],
-            capture_output=True, text=True, timeout=10, encoding="utf-8", errors="replace"
+            [
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-show_entries",
+                "format_tags",
+                "-of",
+                "json",
+                audio_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            encoding="utf-8",
+            errors="replace",
         )
-        if proc.returncode != 0 or not proc.stdout:
-            return None
-        data = json.loads(proc.stdout)
-        tags = data.get("format", {}).get("tags", {})
-        for k, v in tags.items():
-            k_lower = k.lower()
-            if "lyrics" in k_lower or "unsyncedlyrics" in k_lower:
-                text = fix_mojibake(str(v))
-                lines = clean_lyric_lines(text)
-                if lines:
-                    return lines
+        if proc.returncode == 0 and proc.stdout:
+            data = json.loads(proc.stdout)
+            tags = data.get("format", {}).get("tags", {})
+            for k, v in tags.items():
+                k_lower = k.lower()
+                if "lyrics" in k_lower or "unsyncedlyrics" in k_lower:
+                    text = fix_mojibake(str(v))
+                    lines = clean_lyric_lines(text)
+                    if lines:
+                        return lines
     except Exception:
         pass
+
+    # Method 2: ffmpeg ffmetadata fallback (works even if ffprobe is not installed)
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-v", "quiet", "-i", audio_path, "-f", "ffmetadata", "-"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if proc.returncode == 0 and proc.stdout:
+            # Parse FFMETADATA format: key=value (continuation lines have escaped newlines)
+            raw_meta = proc.stdout
+            tag_matches = re.finditer(
+                r"^([^=\n\r]+)=(.*?)(?=^\S+=|\Z)", raw_meta, re.MULTILINE | re.DOTALL
+            )
+            for m in tag_matches:
+                k = m.group(1).strip().lower()
+                if "lyrics" in k or "unsyncedlyrics" in k:
+                    # Unescape ffmetadata escaped newlines and characters
+                    val = (
+                        m.group(2)
+                        .replace("\\\n", "\n")
+                        .replace("\\\r\n", "\n")
+                        .replace("\\=", "=")
+                        .replace("\\;", ";")
+                    )
+                    text = fix_mojibake(val)
+                    lines = clean_lyric_lines(text)
+                    if lines:
+                        return lines
+    except Exception:
+        pass
+
     return None
 
 
 def read_lyrics(path):
-    lines = []
-    for ln in open(path, encoding="utf-8-sig").read().splitlines():
-        s = ln.strip()
-        if not s or re.fullmatch(r"[\[\(（【\*].*[\]\)）】\*]", s):  # skip blank and [Verse]-style tags
-            continue
-        lines.append(s)
-    return lines
+    text = Path(path).read_text(encoding="utf-8-sig")
+    return clean_lyric_lines(text)
 
 
 def guess_lang(lines):
     t = "".join(lines)
-    if re.search(r"[぀-ヿ]", t): return "ja"
-    if re.search(r"[가-힯]", t): return "ko"
-    if re.search(r"[一-鿿]", t): return "zh"
+    if re.search(r"[぀-ヿ]", t):
+        return "ja"
+    if re.search(r"[가-힯]", t):
+        return "ko"
+    if re.search(r"[一-鿿]", t):
+        return "zh"
     return None  # let whisper detect
 
 
@@ -141,12 +241,17 @@ def units(text, lang):
     norm = lambda t: re.sub(r"['’]", "", t.lower())  # don't == dont
     if lang == "zh":
         from pypinyin import lazy_pinyin
+
         return [lazy_pinyin(t)[0] if re.match(CJK, t) else norm(t) for t in toks]
     return [norm(t) for t in toks]
 
 
 def get_whisper():
-    import stable_whisper, whisper, gc
+    import gc
+
+    import stable_whisper
+    import whisper
+
     if "whisper" not in _models:
         gc.collect()
         if DEV == "cuda":
@@ -155,7 +260,9 @@ def get_whisper():
                 orig_dtype = torch.get_default_dtype()
                 torch.set_default_dtype(torch.float16)
                 try:
-                    m = stable_whisper.load_model(WHISPER, device="cuda", cpu_preload=False)
+                    m = stable_whisper.load_model(
+                        WHISPER, device="cuda", cpu_preload=False
+                    )
                 finally:
                     torch.set_default_dtype(orig_dtype)
             for mod in m.modules():
@@ -163,17 +270,43 @@ def get_whisper():
                     mod.float()
             _models["whisper"] = m
         else:
-            _models["whisper"] = stable_whisper.load_model(WHISPER, device="cpu", cpu_preload=True)
+            _models["whisper"] = stable_whisper.load_model(
+                WHISPER, device="cpu", cpu_preload=True
+            )
     return _models["whisper"]
 
 
-INITIALS = ("zh", "ch", "sh", "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h", "j", "q", "x", "r", "z", "c", "s", "y", "w")
+INITIALS = (
+    "zh",
+    "ch",
+    "sh",
+    "b",
+    "p",
+    "m",
+    "f",
+    "d",
+    "t",
+    "n",
+    "l",
+    "g",
+    "k",
+    "h",
+    "j",
+    "q",
+    "x",
+    "r",
+    "z",
+    "c",
+    "s",
+    "y",
+    "w",
+)
 
 
 def split_py(u):
     for ini in INITIALS:
         if u.startswith(ini):
-            return ini, u[len(ini):]
+            return ini, u[len(ini) :]
     return "", u
 
 
@@ -189,7 +322,9 @@ def sim(x, y):
         if LANG_IS_ZH[0]:
             if f1 and f1 == f2 or i1 and i1 == i2:
                 return 0.5
-        elif difflib.SequenceMatcher(None, x, y).ratio() >= 0.6:  # english: misheard but close spelling
+        elif (
+            difflib.SequenceMatcher(None, x, y).ratio() >= 0.6
+        ):  # english: misheard but close spelling
             return 0.5
     return -1.0
 
@@ -198,8 +333,14 @@ def anchors(v16, lines, lang):
     """free transcription + DP match against lyrics -> per line (start, end, match ratio) or None"""
     torch.manual_seed(0)
     LANG_IS_ZH[0] = lang == "zh"
-    r = get_whisper().transcribe(v16, language=lang, word_timestamps=True, verbose=None, fp16=(DEV == "cuda"),
-                                 condition_on_previous_text=False)
+    r = get_whisper().transcribe(
+        v16,
+        language=lang,
+        word_timestamps=True,
+        verbose=None,
+        fp16=(DEV == "cuda"),
+        condition_on_previous_text=False,
+    )
     A = []  # (unit, time)
     for w in r.all_words():
         us = units(w.word, lang)
@@ -210,25 +351,34 @@ def anchors(v16, lines, lang):
         L += [(u, i) for u in units(ln, lang)]
     n, m = len(L), len(A)
     G = -1.0
-    S = np.zeros((n + 1, m + 1)); S[1:, 0] = G * np.arange(1, n + 1)  # ASR side: free leading gap
+    S = np.zeros((n + 1, m + 1))
+    S[1:, 0] = G * np.arange(1, n + 1)  # ASR side: free leading gap
     B = np.zeros((n + 1, m + 1), np.int8)
     for i in range(1, n + 1):
         li = L[i - 1][0]
         for j in range(1, m + 1):
             d = S[i - 1, j - 1] + sim(li, A[j - 1][0])
-            u = S[i - 1, j] + G; l = S[i, j - 1] + G
-            if d >= u and d >= l: S[i, j], B[i, j] = d, 0
-            elif u >= l: S[i, j], B[i, j] = u, 1
-            else: S[i, j], B[i, j] = l, 2
+            u = S[i - 1, j] + G
+            l = S[i, j - 1] + G
+            if d >= u and d >= l:
+                S[i, j], B[i, j] = d, 0
+            elif u >= l:
+                S[i, j], B[i, j] = u, 1
+            else:
+                S[i, j], B[i, j] = l, 2
     i, j = n, int(S[n].argmax())  # free trailing gap on ASR side
     hit = {}  # lyric unit -> (time, weight)
     while i > 0 and j > 0:
         if B[i, j] == 0:
             sc = sim(L[i - 1][0], A[j - 1][0])
-            if sc > 0: hit[i - 1] = (A[j - 1][1], 1.0 if sc == 2 else 0.5)
-            i -= 1; j -= 1
-        elif B[i, j] == 1: i -= 1
-        else: j -= 1
+            if sc > 0:
+                hit[i - 1] = (A[j - 1][1], 1.0 if sc == 2 else 0.5)
+            i -= 1
+            j -= 1
+        elif B[i, j] == 1:
+            i -= 1
+        else:
+            j -= 1
     out = []
     for li in range(len(lines)):
         idx = [k for k in range(n) if L[k][1] == li]
@@ -241,11 +391,14 @@ def anchors(v16, lines, lang):
             med = float(np.median(imp))
             good = [(k, t) for (k, t), x in zip(got, imp) if abs(x - med) < 0.8]
             if not good:  # matches disagree with each other -> no anchor
-                out.append(None); continue
+                out.append(None)
+                continue
             st = good[0][1] - 0.25 * (good[0][0] - k0) - 0.1
             en = good[-1][1] + 0.25 * (k1 - good[-1][0]) + 0.1
             ks = {k for k, _ in good}
-            measured = bool(ks & set(idx[:2])) and bool(ks & set(idx[-2:]))  # start/end heard, not extrapolated
+            measured = bool(ks & set(idx[:2])) and bool(
+                ks & set(idx[-2:])
+            )  # start/end heard, not extrapolated
             out.append((st, en, ratio * len(good) / len(got) if measured else 0.0))
         else:
             out.append(None)
@@ -265,21 +418,29 @@ def whisper_align(v16, lines, lang, trust=0.5):
     i = 0
     while i < len(lines):
         if ok[i]:
-            i += 1; continue
+            i += 1
+            continue
         j = i
         while j < len(lines) and not ok[j]:
             j += 1
         lo = spans[i - 1][1] - 0.1 if i else None
         hi = spans[j][0] + 0.1 if j < len(lines) else None
         # song edges: search at most 8 s per line beyond the outermost trusted anchor (skips long intros/outros)
-        if lo is None: lo = max(0.0, (hi if hi is not None else total) - 8.0 * (j - i))
-        if hi is None: hi = min(total, lo + 8.0 * (j - i))
+        if lo is None:
+            lo = max(0.0, (hi if hi is not None else total) - 8.0 * (j - i))
+        if hi is None:
+            hi = min(total, lo + 8.0 * (j - i))
         block = lines[i:j]
         got = None
         if hi - lo > 0.5:
             try:
-                r = model.align(v16[int(lo * 16000):int(hi * 16000)], "\n".join(block),
-                                language=lang or "en", original_split=True, verbose=None)
+                r = model.align(
+                    v16[int(lo * 16000) : int(hi * 16000)],
+                    "\n".join(block),
+                    language=lang or "en",
+                    original_split=True,
+                    verbose=None,
+                )
                 segs = [s for s in r.segments if s.text.strip()]
                 if len(segs) == len(block):
                     got = [(lo + s.start, lo + s.end, 0.5) for s in segs]
@@ -287,7 +448,9 @@ def whisper_align(v16, lines, lang, trust=0.5):
                 pass
         if got is None:  # give up: spread the block evenly, flag it
             step = (hi - lo) / len(block)
-            got = [(lo + step * k, lo + step * (k + 1), -1.0) for k in range(len(block))]
+            got = [
+                (lo + step * k, lo + step * (k + 1), -1.0) for k in range(len(block))
+            ]
         spans[i:j] = got
         i = j
     # second pass: a line squeezed into a sliver (aligner glued it to the previous line) gets re-aligned alone
@@ -301,7 +464,12 @@ def whisper_align(v16, lines, lang, trust=0.5):
         if hi - lo < 0.5:
             continue
         try:
-            r = model.align(v16[int(lo * 16000):int(hi * 16000)], ln, language=lang or "en", verbose=None)
+            r = model.align(
+                v16[int(lo * 16000) : int(hi * 16000)],
+                ln,
+                language=lang or "en",
+                verbose=None,
+            )
             ws = [w for sg in r.segments for w in sg.words]
             if ws and ws[-1].end - ws[0].start > en - st:
                 spans[i] = (lo + ws[0].start, lo + ws[-1].end, 0.5)
@@ -315,11 +483,13 @@ def whisper_align(v16, lines, lang, trust=0.5):
     return out
 
 
-def extend_tails(spans, v16, drop=20, max_ext=1.0, gap=1.2):  # tuned on 5 user-checked songs
+def extend_tails(
+    spans, v16, drop=20, max_ext=1.0, gap=1.2
+):  # tuned on 5 user-checked songs
     """push each line end through its sustained vocal tail (stops before the next line)."""
     hop = 160  # 10 ms
     n = len(v16) // hop
-    e = np.sqrt((v16[:n * hop].reshape(n, hop) ** 2).mean(1))
+    e = np.sqrt((v16[: n * hop].reshape(n, hop) ** 2).mean(1))
     db = 20 * np.log10(np.convolve(e, np.ones(5) / 5, "same") + 1e-9)
     voiced = db > np.percentile(db, 95) - drop  # reverb tails stay below this
     out = []
@@ -336,18 +506,23 @@ def extend_tails(spans, v16, drop=20, max_ext=1.0, gap=1.2):  # tuned on 5 user-
         run = sung = 0
         for f in range(s0, min(k, n)):
             if voiced[f]:
-                run = 0; sung += 1
+                run = 0
+                sung += 1
             else:
                 run += 1
             if run >= int(gap * 100):
-                if p < 1.0 and voiced[f:min(k, n)].sum() > max(50, 2 * sung):  # only for lines not anchored by ASR
+                if p < 1.0 and voiced[f : min(k, n)].sum() > max(
+                    50, 2 * sung
+                ):  # only for lines not anchored by ASR
                     # silence right after a tiny bit of voice (previous line's tail) = pause before the line: move start
                     g = f
                     while g < min(k, n) and not voiced[g]:
                         g += 1
                     s0, a, run, sung = g, g / 100, 0, 0
                     continue
-                k = f - run + 1  # silence after the line was sung = instrumental: cut the end
+                k = (
+                    f - run + 1
+                )  # silence after the line was sung = instrumental: cut the end
                 b = k / 100
                 break
         lim = min(int(nxt * 100) - 5, k + int(max_ext * 100))  # keep 50 ms gap
@@ -358,25 +533,34 @@ def extend_tails(spans, v16, drop=20, max_ext=1.0, gap=1.2):  # tuned on 5 user-
 
 
 def fmt(t):
-    ms = int(round(t * 1000)); h, ms = divmod(ms, 3600000); m, ms = divmod(ms, 60000); s, ms = divmod(ms, 1000)
+    ms = int(round(t * 1000))
+    h, ms = divmod(ms, 3600000)
+    m, ms = divmod(ms, 60000)
+    s, ms = divmod(ms, 1000)
     return f"{h:02}:{m:02}:{s:02},{ms:03}"
 
 
 def srt_to_lrc(srt_text: str) -> str:
     """1:1 reverse-engineered implementation of ailrcgenerator.com (srt-to-lrc)."""
-    blocks = re.split(r'\n\s*\n', srt_text.strip())
+    blocks = re.split(r"\n\s*\n", srt_text.strip())
     lrc_lines = []
     for block in blocks:
         lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
         if len(lines) >= 3:
-            time_match = re.search(r'(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})', lines[1])
+            time_match = re.search(
+                r"(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})",
+                lines[1],
+            )
             if time_match:
-                h, m, s, ms = int(time_match.group(1)), int(time_match.group(2)), int(time_match.group(3)), int(time_match.group(4))
-                total_sec = h * 3600 + m * 60 + s + ms / 1000.0
-                lrc_min = int(total_sec // 60)
-                rem = total_sec % 60
-                lrc_sec = int(rem)
-                lrc_cent = int((rem - lrc_sec) * 100)
+                h, m, s, ms = (
+                    int(time_match.group(1)),
+                    int(time_match.group(2)),
+                    int(time_match.group(3)),
+                    int(time_match.group(4)),
+                )
+                lrc_min = h * 60 + m
+                lrc_sec = s
+                lrc_cent = ms // 10
                 ts = f"[{lrc_min:02d}:{lrc_sec:02d}.{lrc_cent:02d}]"
                 for text_line in lines[2:]:
                     text_clean = text_line.strip()
@@ -389,56 +573,67 @@ def run(audio, lyr, outp, lang=None):
     t0 = time.time()
     lines = read_lyrics(lyr)
     lang = lang or guess_lang(lines)
-    print(f"{os.path.basename(audio)}  ({len(lines)} lines, lang={lang}, {DEV})", flush=True)
+    print(
+        f"{os.path.basename(audio)}  ({len(lines)} lines, lang={lang}, {DEV})",
+        flush=True,
+    )
     print("  loading audio...", flush=True)
     x, sr = load_audio(audio)
     print("  separating vocals (Demucs)...", flush=True)
     v16 = separate_vocals(x, sr)
-    print(f"  vocals separated  {time.time()-t0:.0f}s", flush=True)
+    print(f"  vocals separated  {time.time() - t0:.0f}s", flush=True)
     import mms_refine
+
     print("  aligning lyrics (Whisper turbo)...", flush=True)
     spans = whisper_align(v16, lines, lang)
     _models.pop("whisper", None)
     import gc
+
     gc.collect()
     if DEV == "cuda":
         torch.cuda.empty_cache()
     print("  refining timestamps (MMS)...", flush=True)
-    spans = extend_tails(mms_refine.refine(v16, spans, lines, DEV), v16)  # MMS sharpens starts, any language
+    spans = extend_tails(
+        mms_refine.refine(v16, spans, lines, DEV), v16
+    )  # MMS sharpens starts, any language
     mms_refine._m.clear()
     gc.collect()
     if DEV == "cuda":
         torch.cuda.empty_cache()
-    print(f"  aligned           {time.time()-t0:.0f}s", flush=True)
+    print(f"  aligned           {time.time() - t0:.0f}s", flush=True)
     srt, warn = [], []
     for i, ((a, b, p), ln) in enumerate(zip(spans, lines)):
-        srt.append(f"{i+1}\n{fmt(a)} --> {fmt(b)}\n{ln}\n")
+        srt.append(f"{i + 1}\n{fmt(a)} --> {fmt(b)}\n{ln}\n")
         n_units = max(1, len(re.findall(r"[぀-鿿가-힯]|[A-Za-z']+", ln)))
         per = (b - a) / n_units
         why = []
-        if p < 0: why.append("對不上，時間是平均分配的")
-        if per < 0.07: why.append("太短（可能被擠壓）")
-        if per > 1.5: why.append("太長（可能跨到別段）")
-        if i and a < spans[i - 1][1] - 0.05: why.append("和上一句重疊")
+        if p < 0:
+            why.append("對不上，時間是平均分配的")
+        if per < 0.07:
+            why.append("太短（可能被擠壓）")
+        if per > 1.5:
+            why.append("太長（可能跨到別段）")
+        if i and a < spans[i - 1][1] - 0.05:
+            why.append("和上一句重疊")
         if why:
-            warn.append(f"  第{i+1}句 {fmt(a)}  {'、'.join(why)}  {ln}")
+            warn.append(f"  第{i + 1}句 {fmt(a)}  {'、'.join(why)}  {ln}")
 
     srt_content = "\n".join(srt)
-    open(outp, "w", encoding="utf-8").write(srt_content)
+    Path(outp).write_text(srt_content, encoding="utf-8")
 
     # 1:1 ailrcgenerator 轉換出 LRC 歌詞
     lrc_content = srt_to_lrc(srt_content)
     lrc_path = os.path.splitext(outp)[0] + ".lrc"
-    open(lrc_path, "w", encoding="utf-8").write(lrc_content)
+    Path(lrc_path).write_text(lrc_content, encoding="utf-8")
     print(f"  [LRC 生成] 已產出 LRC 歌詞: {os.path.basename(lrc_path)}", flush=True)
 
     chk = os.path.splitext(outp)[0] + "_請檢查.txt"
     if warn:
-        open(chk, "w", encoding="utf-8").write("\n".join(warn))
+        Path(chk).write_text("\n".join(warn), encoding="utf-8")
         print(f"  建議檢查 {len(warn)} 句：\n" + "\n".join(warn))
     elif os.path.exists(chk):
         os.remove(chk)
-    print(f"  done {time.time()-t0:.0f}s -> {outp}")
+    print(f"  done {time.time() - t0:.0f}s -> {outp}")
 
     # 最後輸出完的歌曲與歌詞（.mp3, .txt, .srt, .lrc）存入 songs 資料夾
     songs_dir = Path(__file__).resolve().parent / "songs"
@@ -453,7 +648,10 @@ def run(audio, lyr, outp, lang=None):
             if target_file.resolve() != Path(src_file).resolve():
                 shutil.copy2(src_file, target_file)
 
-    print(f"  [歸檔完成] 歌曲與歌詞檔（音訊/.txt/.srt/.lrc）已存入: {songs_dir}", flush=True)
+    print(
+        f"  [歸檔完成] 歌曲與歌詞檔（音訊/.txt/.srt/.lrc）已存入: {songs_dir}",
+        flush=True,
+    )
 
 
 def run_transcription(audio, outp, lang=None):
@@ -469,7 +667,7 @@ def run_transcription(audio, outp, lang=None):
 
     print("  separating vocals (Demucs)...", flush=True)
     v16 = separate_vocals(x, sr)
-    print(f"  vocals separated  {time.time()-t0:.0f}s", flush=True)
+    print(f"  vocals separated  {time.time() - t0:.0f}s", flush=True)
 
     print("  transcribing speech (Whisper turbo)...", flush=True)
     model = get_whisper()
@@ -480,10 +678,11 @@ def run_transcription(audio, outp, lang=None):
         word_timestamps=True,
         verbose=None,
         fp16=(DEV == "cuda"),
-        condition_on_previous_text=False
+        condition_on_previous_text=False,
     )
     _models.pop("whisper", None)
     import gc
+
     gc.collect()
     if DEV == "cuda":
         torch.cuda.empty_cache()
@@ -491,7 +690,7 @@ def run_transcription(audio, outp, lang=None):
     # 針對歌詞斷句優化：依據停頓與標點分行
     try:
         result.split_by_gap(0.8)
-        result.split_by_punctuation([',', '.', '!', '?', '，', '。', '！', '？', '…'])
+        result.split_by_punctuation([",", ".", "!", "?", "，", "。", "！", "？", "…"])
     except Exception:
         pass
 
@@ -500,10 +699,12 @@ def run_transcription(audio, outp, lang=None):
 
     for seg in result.segments:
         text = seg.text.strip()
-        text = re.sub(r'^[，。！？,.!?…\s]+|[，。！？,.!?…\s]+$', '', text).strip()
+        text = re.sub(r"^[，。！？,.!?…\s]+|[，。！？,.!?…\s]+$", "", text).strip()
         if not text:
             continue
-        srt_entries.append(f"{len(srt_entries)+1}\n{fmt(seg.start)} --> {fmt(seg.end)}\n{text}\n")
+        srt_entries.append(
+            f"{len(srt_entries) + 1}\n{fmt(seg.start)} --> {fmt(seg.end)}\n{text}\n"
+        )
         lyric_lines.append(text)
 
     if not srt_entries:
@@ -511,19 +712,22 @@ def run_transcription(audio, outp, lang=None):
 
     # 1. 寫入 SRT 字幕檔
     srt_content = "\n".join(srt_entries)
-    open(outp, "w", encoding="utf-8").write(srt_content)
+    Path(outp).write_text(srt_content, encoding="utf-8")
     print(f"  [SRT 產出] {os.path.basename(outp)}", flush=True)
 
     # 2. 備份出純歌詞 TXT 檔
-    open(txt_path, "w", encoding="utf-8").write("\n".join(lyric_lines) + "\n")
-    print(f"  [歌詞備份] 已自動存出聽寫文字: {os.path.basename(txt_path)}（共 {len(lyric_lines)} 行）", flush=True)
+    Path(txt_path).write_text("\n".join(lyric_lines) + "\n", encoding="utf-8")
+    print(
+        f"  [歌詞備份] 已自動存出聽寫文字: {os.path.basename(txt_path)}（共 {len(lyric_lines)} 行）",
+        flush=True,
+    )
 
     # 3. 產生 LRC 動態歌詞檔 (1:1 逆向 ailrcgenerator 演算法)
     lrc_content = srt_to_lrc(srt_content)
-    open(lrc_path, "w", encoding="utf-8").write(lrc_content)
+    Path(lrc_path).write_text(lrc_content, encoding="utf-8")
     print(f"  [LRC 生成] 已產出 LRC 歌詞: {os.path.basename(lrc_path)}", flush=True)
 
-    print(f"  done {time.time()-t0:.0f}s -> {outp}", flush=True)
+    print(f"  done {time.time() - t0:.0f}s -> {outp}", flush=True)
 
     # 4. 同步歸檔至 songs/ 目錄
     songs_dir = Path(__file__).resolve().parent / "songs"
@@ -535,7 +739,10 @@ def run_transcription(audio, outp, lang=None):
             if target_file.resolve() != Path(src_file).resolve():
                 shutil.copy2(src_file, target_file)
 
-    print(f"  [歸檔完成] 歌曲與所有產物（音訊/.txt/.srt/.lrc）已存入: {songs_dir}", flush=True)
+    print(
+        f"  [歸檔完成] 歌曲與所有產物（音訊/.txt/.srt/.lrc）已存入: {songs_dir}",
+        flush=True,
+    )
 
 
 AUDIO_ALL = AUDIO_EXT + (".mp4", ".mov", ".mkv", ".aac", ".wma")
@@ -546,7 +753,9 @@ def find_pairs(paths):
     bases = []
     for p in paths:
         if os.path.isdir(p):
-            bases += [os.path.join(p, os.path.splitext(f)[0]) for f in sorted(os.listdir(p))]
+            bases += [
+                os.path.join(p, os.path.splitext(f)[0]) for f in sorted(os.listdir(p))
+            ]
         else:
             bases.append(os.path.splitext(p)[0])
     pairs, seen = [], set()
@@ -564,31 +773,54 @@ def find_pairs(paths):
                 # 嘗試提取音訊內嵌歌詞（Suno/Udio/ID3 tags）
                 lines = extract_embedded_lyrics(audio)
                 if lines:
-                    with open(txt_path, "w", encoding="utf-8") as f:
-                        f.write("\n".join(lines) + "\n")
-                    print(f"  [內嵌歌詞] 已從 {os.path.basename(audio)} 提取並自動備份至 {os.path.basename(txt_path)}（共 {len(lines)} 行）", flush=True)
+                    try:
+                        Path(txt_path).write_text(
+                            "\n".join(lines) + "\n", encoding="utf-8"
+                        )
+                        print(
+                            f"  [內嵌歌詞] 已從 {os.path.basename(audio)} 提取並自動備份至 {os.path.basename(txt_path)}（共 {len(lines)} 行）",
+                            flush=True,
+                        )
+                    except OSError as e:
+                        print(
+                            f"  [內嵌歌詞] 提取成功（備份至磁碟略過: {e}）", flush=True
+                        )
                     pairs.append((audio, txt_path))
                 else:
-                    print(f"  [純聽寫模式] {os.path.basename(audio)}：未附歌詞且無內嵌標籤，將啟用 GPU 人聲分離 + Whisper 純聽寫模式...", flush=True)
+                    print(
+                        f"  [純聽寫模式] {os.path.basename(audio)}：未附歌詞且無內嵌標籤，將啟用 GPU 人聲分離 + Whisper 純聽寫模式...",
+                        flush=True,
+                    )
                     pairs.append((audio, None))
         elif os.path.exists(txt_path):
-            print(f"  !! {os.path.basename(base)}：缺同名的音訊檔（音訊與歌詞檔名要一致）", flush=True)
+            print(
+                f"  !! {os.path.basename(base)}：缺同名的音訊檔（音訊與歌詞檔名要一致）",
+                flush=True,
+            )
     return pairs
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("paths", nargs="+"); ap.add_argument("--lang")
+    ap.add_argument("paths", nargs="+")
+    ap.add_argument("--lang")
     a = ap.parse_args()
 
     # 1. 支援直接拖曳 .srt 轉換為 .lrc
-    srt_inputs = [p for p in a.paths if os.path.isfile(p) and p.lower().endswith(".srt")]
-    non_srt_paths = [p for p in a.paths if not (os.path.isfile(p) and p.lower().endswith(".srt"))]
+    srt_inputs = [
+        p for p in a.paths if os.path.isfile(p) and p.lower().endswith(".srt")
+    ]
+    non_srt_paths = [
+        p for p in a.paths if not (os.path.isfile(p) and p.lower().endswith(".srt"))
+    ]
     for srt_path in srt_inputs:
-        print(f"偵測到字幕檔: {os.path.basename(srt_path)}，直接進行 SRT -> LRC 轉換...", flush=True)
-        lrc_text = srt_to_lrc(open(srt_path, encoding="utf-8-sig").read())
+        print(
+            f"偵測到字幕檔: {os.path.basename(srt_path)}，直接進行 SRT -> LRC 轉換...",
+            flush=True,
+        )
+        lrc_text = srt_to_lrc(Path(srt_path).read_text(encoding="utf-8-sig"))
         lrc_path = os.path.splitext(srt_path)[0] + ".lrc"
-        open(lrc_path, "w", encoding="utf-8").write(lrc_text)
+        Path(lrc_path).write_text(lrc_text, encoding="utf-8")
         print(f"  [LRC 生成] 已產出 LRC: {os.path.basename(lrc_path)}", flush=True)
         songs_dir = Path(__file__).resolve().parent / "songs"
         songs_dir.mkdir(parents=True, exist_ok=True)
@@ -601,7 +833,9 @@ def main():
     if non_srt_paths:
         pairs = find_pairs(non_srt_paths)
         if not pairs and not srt_inputs:
-            print("沒找到可以對齊的歌。請把「歌曲檔」或「歌詞 txt」或「字幕 srt」或「整個資料夾」拖到 DROP_HERE.bat 上。")
+            print(
+                "沒找到可以對齊的歌。請把「歌曲檔」或「歌詞 txt」或「字幕 srt」或「整個資料夾」拖到 DROP_HERE.bat 上。"
+            )
         failed = not bool(pairs)
         for audio, txt in pairs:
             try:
